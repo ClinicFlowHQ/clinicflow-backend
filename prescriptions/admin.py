@@ -1,21 +1,43 @@
 from django.contrib import admin
-from .models import Prescription, PrescriptionItem
+from .models import (
+    Medication,
+    PrescriptionTemplate,
+    PrescriptionTemplateItem,
+    Prescription,
+    PrescriptionItem,
+)
+
+
+@admin.register(Medication)
+class MedicationAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "strength", "form", "is_active")
+    list_filter = ("is_active", "form")
+    search_fields = ("name", "strength", "form")
+
+
+class PrescriptionTemplateItemInline(admin.TabularInline):
+    model = PrescriptionTemplateItem
+    extra = 1
+    autocomplete_fields = ["medication"]
+
+
+@admin.register(PrescriptionTemplate)
+class PrescriptionTemplateAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("name",)
+    inlines = [PrescriptionTemplateItemInline]
 
 
 class PrescriptionItemInline(admin.TabularInline):
     model = PrescriptionItem
     extra = 1
+    autocomplete_fields = ["medication"]
 
 
 @admin.register(Prescription)
 class PrescriptionAdmin(admin.ModelAdmin):
-    list_display = ("id", "visit", "created_at")
-    list_filter = ("created_at",)
+    list_display = ("id", "visit", "template_used", "created_at")
+    list_filter = ("created_at", "template_used")
     search_fields = ("visit__patient__first_name", "visit__patient__last_name")
     inlines = [PrescriptionItemInline]
-
-
-@admin.register(PrescriptionItem)
-class PrescriptionItemAdmin(admin.ModelAdmin):
-    list_display = ("id", "prescription", "medication_name", "dosage", "frequency", "duration")
-    search_fields = ("medication_name",)
