@@ -59,8 +59,8 @@ https://github.com/ClinicFlowHQ/clinicflow-frontend
 
 ## Project Structure
 
+```text
 clinicflow-backend/
-│
 ├── accounts/                 # Authentication & doctor profile
 │   ├── models.py
 │   ├── serializers.py
