@@ -58,7 +58,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://clinicflow-frontend.onrender.com",
 ]
 
-]
+
 
 ROOT_URLCONF = "config.urls"
 
