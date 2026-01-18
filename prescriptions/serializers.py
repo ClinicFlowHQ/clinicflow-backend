@@ -1,3 +1,5 @@
+# prescriptions/serializers.py
+
 from rest_framework import serializers
 from .models import (
     Medication,
@@ -19,7 +21,7 @@ class PrescriptionItemWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = PrescriptionItem
         fields = [
-            "medication",  # FK id
+            "medication",
             "dosage",
             "route",
             "frequency",
@@ -45,6 +47,34 @@ class PrescriptionItemReadSerializer(serializers.ModelSerializer):
             "instructions",
             "allow_outside_purchase",
         ]
+
+
+# -------- Prescription (LIST) --------
+# Used for: GET /api/prescriptions/  (Option A UI)
+# Shows patient name + visit number alongside each saved prescription.
+class PrescriptionListSerializer(serializers.ModelSerializer):
+    visit_id = serializers.IntegerField(source="visit.id", read_only=True)
+    patient_id = serializers.IntegerField(source="visit.patient.id", read_only=True)
+    patient_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Prescription
+        fields = [
+            "id",
+            "visit_id",
+            "patient_id",
+            "patient_name",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_patient_name(self, obj):
+        patient = getattr(obj.visit, "patient", None)
+        if not patient:
+            return ""
+        first = getattr(patient, "first_name", "") or ""
+        last = getattr(patient, "last_name", "") or ""
+        return f"{first} {last}".strip()
 
 
 # -------- Prescription (WRITE) --------
@@ -85,6 +115,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
             PrescriptionItem.objects.bulk_create(
                 [PrescriptionItem(prescription=instance, **item) for item in items_data]
             )
+
         return instance
 
 
