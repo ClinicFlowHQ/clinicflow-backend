@@ -52,11 +52,13 @@ MIDDLEWARE = [
 ]
 
 
-CORS_ALLOWED_ORIGINS = [
+# CORS: Read additional origins from environment variable
+_default_cors = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://clinicflow-frontend.onrender.com",
 ]
+_extra_cors = os.getenv("CORS_ALLOWED_ORIGINS", "")
+CORS_ALLOWED_ORIGINS = _default_cors + [url.strip() for url in _extra_cors.split(",") if url.strip()]
 
 
 
