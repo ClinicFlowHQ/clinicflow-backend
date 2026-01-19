@@ -1,3 +1,4 @@
+# visits/serializers.py
 from rest_framework import serializers
 from .models import Visit, VitalSign
 
@@ -24,14 +25,26 @@ class VitalSignSerializer(serializers.ModelSerializer):
 
 
 class VisitSerializer(serializers.ModelSerializer):
-    # Nested read-only vitals list on a visit
     vital_signs = VitalSignSerializer(many=True, read_only=True)
+
+    # ✅ Added for dropdown labels
+    patient_name = serializers.SerializerMethodField()
+
+    def get_patient_name(self, obj):
+        p = getattr(obj, "patient", None)
+        if not p:
+            return None
+        fn = getattr(p, "first_name", "") or ""
+        ln = getattr(p, "last_name", "") or ""
+        name = f"{fn} {ln}".strip()
+        return name or None
 
     class Meta:
         model = Visit
         fields = [
             "id",
             "patient",
+            "patient_name",  # ✅ added
             "visit_date",
             "visit_type",
             "chief_complaint",

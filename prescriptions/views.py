@@ -1,27 +1,34 @@
+# prescriptions/views.py
 from io import BytesIO
+
 from django.http import HttpResponse
-from rest_framework import generics, permissions, status
-from rest_framework.views import APIView
+
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.filters import SearchFilter
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from .models import Prescription, Medication, PrescriptionTemplate
+
+from .models import Medication, Prescription, PrescriptionTemplate
+from .permissions import IsStaffOrReadOnly
 from .serializers import (
     MedicationSerializer,
     PrescriptionSerializer,
     PrescriptionDetailSerializer,
+    PrescriptionListSerializer,
     PrescriptionTemplateSerializer,
     PrescriptionTemplateDetailSerializer,
     PrescriptionTemplateWriteSerializer,
 )
 
 
-# PDF translations
+# PDF translations for bilingual support
 PDF_TRANSLATIONS = {
     "en": {
         "title": "Medical Prescription",
@@ -72,66 +79,75 @@ PDF_TRANSLATIONS = {
 }
 
 
-class MedicationListCreateAPIView(generics.ListCreateAPIView):
-    queryset = Medication.objects.filter(is_active=True).order_by("name")
+class MedicationViewSet(viewsets.ModelViewSet):
+    queryset = Medication.objects.all().order_by("name")
     serializer_class = MedicationSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsStaffOrReadOnly]
+    filter_backends = [SearchFilter]
+    search_fields = ["name", "strength", "form"]
 
 
-class PrescriptionListCreateAPIView(generics.ListCreateAPIView):
-    queryset = (
-        Prescription.objects
-        .select_related("visit", "visit__patient", "template_used")
-        .prefetch_related("items__medication")
-        .all()
-    )
-    permission_classes = [permissions.IsAuthenticated]
+class PrescriptionTemplateViewSet(viewsets.ModelViewSet):
+    queryset = PrescriptionTemplate.objects.prefetch_related("items__medication").all().order_by("name")
+    permission_classes = [IsAuthenticated]
+    filter_backends = [SearchFilter]
+    search_fields = ["name", "name_fr", "description", "description_fr"]
 
     def get_serializer_class(self):
-        if self.request.method == "GET":
+        if self.action == "retrieve":
+            return PrescriptionTemplateDetailSerializer
+        if self.action in ["create", "update", "partial_update"]:
+            return PrescriptionTemplateWriteSerializer
+        return PrescriptionTemplateSerializer
+
+
+class PrescriptionViewSet(viewsets.ModelViewSet):
+    queryset = (
+        Prescription.objects.all()
+        .select_related("visit", "visit__patient")
+        .prefetch_related("items__medication")
+        .order_by("-created_at")
+    )
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """
+        Optional filters:
+        /api/prescriptions/?visit=<visit_id>
+        /api/prescriptions/?patient=<patient_id>
+        """
+        qs = super().get_queryset()
+
+        visit_id = self.request.query_params.get("visit")
+        if visit_id:
+            qs = qs.filter(visit_id=visit_id)
+
+        patient_id = self.request.query_params.get("patient")
+        if patient_id:
+            qs = qs.filter(visit__patient_id=patient_id)
+
+        return qs
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return PrescriptionListSerializer
+        if self.action == "retrieve":
             return PrescriptionDetailSerializer
         return PrescriptionSerializer
 
+    @action(detail=True, methods=["get"])
+    def pdf(self, request, pk=None):
+        """
+        GET /api/prescriptions/{id}/pdf/?lang=fr
+        Returns a bilingual PDF (French or English).
+        """
+        rx = self.get_object()
 
-class PrescriptionDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = (
-        Prescription.objects
-        .select_related("visit", "visit__patient", "template_used")
-        .prefetch_related("items__medication")
-        .all()
-    )
-    permission_classes = [permissions.IsAuthenticated]
-    serializer_class = PrescriptionSerializer
-
-    def get_serializer_class(self):
-        if self.request.method == "GET":
-            return PrescriptionDetailSerializer
-        return PrescriptionSerializer
-
-
-class PrescriptionPDFView(APIView):
-    """Generate PDF for a prescription (supports French/English)."""
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request, pk):
         # Get language from query param (default to French)
         lang = request.query_params.get("lang", "fr")
         if lang not in PDF_TRANSLATIONS:
             lang = "fr"
         t = PDF_TRANSLATIONS[lang]
-
-        try:
-            prescription = (
-                Prescription.objects
-                .select_related("visit", "visit__patient")
-                .prefetch_related("items__medication")
-                .get(pk=pk)
-            )
-        except Prescription.DoesNotExist:
-            return Response(
-                {"detail": "Prescription not found."},
-                status=status.HTTP_404_NOT_FOUND
-            )
 
         # Get prescriber info (current user making the request)
         user = request.user
@@ -188,13 +204,6 @@ class PrescriptionPDFView(APIView):
             fontSize=10,
             spaceAfter=4,
         )
-        prescriber_style = ParagraphStyle(
-            'PrescriberStyle',
-            parent=styles['Normal'],
-            fontSize=11,
-            spaceAfter=2,
-            textColor=colors.HexColor('#374151'),
-        )
 
         # Build content
         content = []
@@ -205,16 +214,16 @@ class PrescriptionPDFView(APIView):
         content.append(Spacer(1, 10))
 
         # Prescription info
-        patient = prescription.visit.patient
+        patient = rx.visit.patient
         patient_name = f"{patient.first_name} {patient.last_name}"
-        patient_code = patient.patient_code or "-"
-        visit_date = prescription.visit.visit_date.strftime("%d/%m/%Y %H:%M") if prescription.visit.visit_date else "-"
-        created_date = prescription.created_at.strftime("%d/%m/%Y %H:%M") if prescription.created_at else "-"
+        patient_code = getattr(patient, 'patient_code', None) or "-"
+        visit_date = rx.visit.visit_date.strftime("%d/%m/%Y %H:%M") if rx.visit.visit_date else "-"
+        created_date = rx.created_at.strftime("%d/%m/%Y %H:%M") if rx.created_at else "-"
 
         # Patient info table
         patient_data = [
             [t["patient"], patient_name, t["code"], patient_code],
-            [t["visit_date"], visit_date, t["prescription_num"], str(prescription.id)],
+            [t["visit_date"], visit_date, t["prescription_num"], str(rx.id)],
             [t["created"], created_date, "", ""],
         ]
         patient_table = Table(patient_data, colWidths=[80, 140, 80, 90])
@@ -233,7 +242,7 @@ class PrescriptionPDFView(APIView):
         # Medications section
         content.append(Paragraph(t["medications"], heading_style))
 
-        items = prescription.items.all()
+        items = rx.items.all()
         if items.exists():
             # Medications table header
             med_data = [[t["med_num"], t["medication"], t["dosage"], t["route"], t["frequency"], t["duration"]]]
@@ -274,11 +283,11 @@ class PrescriptionPDFView(APIView):
             content.append(Paragraph(t["no_medications"], normal_style))
 
         # Notes section
-        if prescription.notes:
+        if rx.notes:
             content.append(Spacer(1, 15))
             content.append(Paragraph(t["additional_notes"], heading_style))
             # Handle multiline notes
-            for line in prescription.notes.split('\n'):
+            for line in rx.notes.split('\n'):
                 if line.strip():
                     content.append(Paragraph(line, normal_style))
 
@@ -325,25 +334,5 @@ class PrescriptionPDFView(APIView):
         # Return response
         buffer.seek(0)
         response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="ordonnance_{prescription.id}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="ordonnance_{rx.id}.pdf"'
         return response
-
-
-class PrescriptionTemplateListCreateAPIView(generics.ListCreateAPIView):
-    queryset = PrescriptionTemplate.objects.prefetch_related("items__medication").all()
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_serializer_class(self):
-        if self.request.method == "POST":
-            return PrescriptionTemplateWriteSerializer
-        return PrescriptionTemplateSerializer
-
-
-class PrescriptionTemplateDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = PrescriptionTemplate.objects.prefetch_related("items__medication").all()
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_serializer_class(self):
-        if self.request.method in ["PUT", "PATCH"]:
-            return PrescriptionTemplateWriteSerializer
-        return PrescriptionTemplateDetailSerializer

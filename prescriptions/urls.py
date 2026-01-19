@@ -1,18 +1,20 @@
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from .views import (
-    MedicationListCreateAPIView,
-    PrescriptionListCreateAPIView,
-    PrescriptionDetailAPIView,
-    PrescriptionPDFView,
-    PrescriptionTemplateListCreateAPIView,
-    PrescriptionTemplateDetailAPIView,
+    PrescriptionViewSet,
+    PrescriptionTemplateViewSet,
+    MedicationViewSet,
 )
 
+router = DefaultRouter()
+
+# IMPORTANT: register specific prefixes FIRST
+router.register(r"templates", PrescriptionTemplateViewSet, basename="prescription-template")
+router.register(r"medications", MedicationViewSet, basename="medication")
+
+# Register "" LAST so it doesn't swallow "templates" as a pk
+router.register(r"", PrescriptionViewSet, basename="prescription")
+
 urlpatterns = [
-    path("templates/", PrescriptionTemplateListCreateAPIView.as_view(), name="prescription-template-list"),
-    path("templates/<int:pk>/", PrescriptionTemplateDetailAPIView.as_view(), name="prescription-template-detail"),
-    path("medications/", MedicationListCreateAPIView.as_view(), name="medication-list-create"),
-    path("", PrescriptionListCreateAPIView.as_view(), name="prescription-list-create"),
-    path("<int:pk>/", PrescriptionDetailAPIView.as_view(), name="prescription-detail"),
-    path("<int:pk>/pdf/", PrescriptionPDFView.as_view(), name="prescription-pdf"),
+    path("", include(router.urls)),
 ]
