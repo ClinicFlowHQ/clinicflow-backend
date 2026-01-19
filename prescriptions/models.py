@@ -21,7 +21,9 @@ class Medication(models.Model):
 
 class PrescriptionTemplate(models.Model):
     name = models.CharField(max_length=150)
+    name_fr = models.CharField(max_length=150, blank=True, default="")
     description = models.TextField(blank=True, default="")
+    description_fr = models.TextField(blank=True, default="")
     is_active = models.BooleanField(default=True)
 
     class Meta:

@@ -23,9 +23,18 @@ class PrescriptionTemplateItemInline(admin.TabularInline):
 
 @admin.register(PrescriptionTemplate)
 class PrescriptionTemplateAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "is_active")
+    list_display = ("id", "name", "name_fr", "is_active")
     list_filter = ("is_active",)
-    search_fields = ("name",)
+    search_fields = ("name", "name_fr")
+    fieldsets = (
+        (None, {
+            "fields": ("name", "description", "is_active")
+        }),
+        ("French / Français", {
+            "fields": ("name_fr", "description_fr"),
+            "classes": ("collapse",),
+        }),
+    )
     inlines = [PrescriptionTemplateItemInline]
 
 

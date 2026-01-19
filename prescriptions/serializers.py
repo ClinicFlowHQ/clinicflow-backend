@@ -88,9 +88,28 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         return instance
 
 
+# -------- Nested Visit (for prescription detail) --------
+class VisitNestedSerializer(serializers.Serializer):
+    """Lightweight nested visit for prescriptions."""
+    id = serializers.IntegerField()
+    visit_date = serializers.DateTimeField()
+    visit_type = serializers.CharField()
+    patient = serializers.SerializerMethodField()
+
+    def get_patient(self, obj):
+        p = obj.patient
+        return {
+            "id": p.id,
+            "patient_code": p.patient_code,
+            "first_name": p.first_name,
+            "last_name": p.last_name,
+        }
+
+
 # -------- Prescription (READ detail) --------
 class PrescriptionDetailSerializer(serializers.ModelSerializer):
     items = PrescriptionItemReadSerializer(many=True)
+    visit = VisitNestedSerializer(read_only=True)
 
     class Meta:
         model = Prescription
@@ -134,7 +153,7 @@ class PrescriptionTemplateItemReadSerializer(serializers.ModelSerializer):
 class PrescriptionTemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model = PrescriptionTemplate
-        fields = ["id", "name", "description", "is_active"]
+        fields = ["id", "name", "name_fr", "description", "description_fr", "is_active"]
 
 
 class PrescriptionTemplateDetailSerializer(serializers.ModelSerializer):
@@ -142,4 +161,51 @@ class PrescriptionTemplateDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PrescriptionTemplate
-        fields = ["id", "name", "description", "is_active", "items"]
+        fields = ["id", "name", "name_fr", "description", "description_fr", "is_active", "items"]
+
+
+# -------- Template Item (WRITE) --------
+class PrescriptionTemplateItemWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PrescriptionTemplateItem
+        fields = [
+            "medication",
+            "dosage",
+            "route",
+            "frequency",
+            "duration",
+            "instructions",
+        ]
+
+
+# -------- Template (WRITE) --------
+class PrescriptionTemplateWriteSerializer(serializers.ModelSerializer):
+    items = PrescriptionTemplateItemWriteSerializer(many=True, required=False)
+
+    class Meta:
+        model = PrescriptionTemplate
+        fields = ["id", "name", "name_fr", "description", "description_fr", "is_active", "items"]
+        read_only_fields = ["id"]
+
+    def create(self, validated_data):
+        items_data = validated_data.pop("items", [])
+        template = PrescriptionTemplate.objects.create(**validated_data)
+
+        PrescriptionTemplateItem.objects.bulk_create(
+            [PrescriptionTemplateItem(template=template, **item) for item in items_data]
+        )
+        return template
+
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop("items", None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if items_data is not None:
+            instance.items.all().delete()
+            PrescriptionTemplateItem.objects.bulk_create(
+                [PrescriptionTemplateItem(template=instance, **item) for item in items_data]
+            )
+        return instance
