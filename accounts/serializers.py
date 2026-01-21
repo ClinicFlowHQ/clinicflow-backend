@@ -1,8 +1,41 @@
+import re
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import UserProfile
+from .models import UserProfile, DoctorAvailability
 
 User = get_user_model()
+
+
+def validate_password_strength(password):
+    """
+    Validate password meets security requirements:
+    - At least 8 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit
+    - At least one special character
+    """
+    errors = []
+
+    if len(password) < 8:
+        errors.append("Password must be at least 8 characters long.")
+
+    if not re.search(r'[A-Z]', password):
+        errors.append("Password must contain at least one uppercase letter.")
+
+    if not re.search(r'[a-z]', password):
+        errors.append("Password must contain at least one lowercase letter.")
+
+    if not re.search(r'\d', password):
+        errors.append("Password must contain at least one digit.")
+
+    if not re.search(r'[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/~`]', password):
+        errors.append("Password must contain at least one special character (!@#$%^&*(),.?\":{}|<>).")
+
+    if errors:
+        raise serializers.ValidationError(errors)
+
+    return password
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -107,7 +140,7 @@ class ChangePasswordSerializer(serializers.Serializer):
     """Serializer for password change."""
 
     current_password = serializers.CharField(required=True, write_only=True)
-    new_password = serializers.CharField(required=True, write_only=True, min_length=8)
+    new_password = serializers.CharField(required=True, write_only=True)
     confirm_password = serializers.CharField(required=True, write_only=True)
 
     def validate_current_password(self, value):
@@ -115,6 +148,10 @@ class ChangePasswordSerializer(serializers.Serializer):
         if not user.check_password(value):
             raise serializers.ValidationError("Current password is incorrect.")
         return value
+
+    def validate_new_password(self, value):
+        """Validate new password meets security requirements."""
+        return validate_password_strength(value)
 
     def validate(self, data):
         if data['new_password'] != data['confirm_password']:
@@ -128,3 +165,45 @@ class ChangePasswordSerializer(serializers.Serializer):
         user.set_password(self.validated_data['new_password'])
         user.save()
         return user
+
+
+class DoctorAvailabilitySerializer(serializers.ModelSerializer):
+    """Serializer for doctor availability slots."""
+
+    slot_display = serializers.CharField(source='get_slot_display', read_only=True)
+
+    class Meta:
+        model = DoctorAvailability
+        fields = [
+            'id',
+            'doctor',
+            'date',
+            'slot',
+            'slot_display',
+            'start_time',
+            'end_time',
+            'notes',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'doctor', 'created_at', 'updated_at']
+
+
+class BulkAvailabilitySerializer(serializers.Serializer):
+    """Serializer for bulk availability updates."""
+
+    availabilities = serializers.ListField(
+        child=serializers.DictField(),
+        allow_empty=True
+    )
+
+    def validate_availabilities(self, value):
+        for item in value:
+            if 'date' not in item:
+                raise serializers.ValidationError("Each availability must have a 'date' field.")
+            if 'slot' not in item:
+                raise serializers.ValidationError("Each availability must have a 'slot' field.")
+            valid_slots = [choice[0] for choice in DoctorAvailability.SLOT_CHOICES]
+            if item['slot'] not in valid_slots:
+                raise serializers.ValidationError(f"Invalid slot: {item['slot']}. Must be one of {valid_slots}")
+        return value

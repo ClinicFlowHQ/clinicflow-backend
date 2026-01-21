@@ -86,3 +86,41 @@ def save_user_profile(sender, instance, **kwargs):
     if not hasattr(instance, 'profile'):
         role = 'admin' if instance.is_superuser else 'nurse'
         UserProfile.objects.create(user=instance, role=role)
+
+
+class DoctorAvailability(models.Model):
+    """Doctor availability slots for appointment scheduling."""
+
+    SLOT_CHOICES = [
+        ('morning', 'Morning (8:00-12:00)'),
+        ('afternoon', 'Afternoon (12:00-17:00)'),
+        ('evening', 'Evening (17:00-21:00)'),
+        ('full_day', 'Full Day'),
+        ('unavailable', 'Unavailable'),
+    ]
+
+    doctor = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='availabilities'
+    )
+    date = models.DateField()
+    slot = models.CharField(
+        max_length=20,
+        choices=SLOT_CHOICES,
+        default='full_day'
+    )
+    start_time = models.TimeField(null=True, blank=True, help_text="Custom start time")
+    end_time = models.TimeField(null=True, blank=True, help_text="Custom end time")
+    notes = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Doctor Availability"
+        verbose_name_plural = "Doctor Availabilities"
+        unique_together = ['doctor', 'date']
+        ordering = ['date']
+
+    def __str__(self):
+        return f"{self.doctor.username} - {self.date} ({self.get_slot_display()})"

@@ -10,13 +10,13 @@ User = get_user_model()
 
 
 class DoctorListAPIView(APIView):
-    """List users with doctor role for appointment assignment."""
+    """List users with doctor or nurse role for appointment assignment."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        # Get users who have a profile with role 'doctor' or 'admin'
+        # Get users who have a profile with role 'doctor' or 'nurse' (exclude admin)
         doctors = User.objects.filter(
-            profile__role__in=['doctor', 'admin']
+            profile__role__in=['doctor', 'nurse']
         ).select_related('profile').order_by('first_name', 'last_name')
         serializer = DoctorSerializer(doctors, many=True)
         return Response(serializer.data)
