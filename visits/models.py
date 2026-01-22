@@ -20,10 +20,13 @@ class Visit(models.Model):
 
     # Medical content (doctor notes)
     chief_complaint = models.CharField(max_length=255, blank=True, default="")
+    medical_history = models.TextField(blank=True, default="")  # before HPI
     history_of_present_illness = models.TextField(blank=True, default="")
     physical_exam = models.TextField(blank=True, default="")
+    complementary_exam = models.TextField(blank=True, default="")  # after physical exam
     assessment = models.TextField(blank=True, default="")  # diagnosis / impressions
     plan = models.TextField(blank=True, default="")        # treatment plan
+    treatment = models.TextField(blank=True, default="")   # treatment details
     notes = models.TextField(blank=True, default="")
 
     # Metadata

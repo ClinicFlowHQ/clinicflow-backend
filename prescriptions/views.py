@@ -19,7 +19,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from .models import Medication, Prescription, PrescriptionTemplate
-from .permissions import IsStaffOrReadOnly
+from .permissions import IsStaffOrReadOnly, IsDoctorOnly
 from .serializers import (
     MedicationSerializer,
     PrescriptionSerializer,
@@ -31,54 +31,31 @@ from .serializers import (
 )
 
 
-# PDF translations for bilingual support
+# PDF translations (French only)
 PDF_TRANSLATIONS = {
-    "en": {
-        "title": "Medical Prescription",
-        "patient": "Patient:",
-        "code": "Code:",
-        "visit_date": "Visit Date:",
-        "prescription_num": "Prescription #:",
-        "created": "Created:",
-        "prescriber": "Prescriber:",
-        "license": "License #:",
-        "medications": "Medications",
-        "med_num": "#",
-        "medication": "Medication",
-        "dosage": "Dosage",
-        "route": "Route",
-        "frequency": "Frequency",
-        "duration": "Duration",
-        "instructions": "Instructions",
-        "no_medications": "No medications listed.",
-        "additional_notes": "Additional Notes",
-        "signature": "Prescriber Signature",
-        "date": "Date:",
-        "stamp": "Stamp",
-    },
-    "fr": {
-        "title": "Ordonnance Médicale",
-        "patient": "Patient :",
-        "code": "Code :",
-        "visit_date": "Date de visite :",
-        "prescription_num": "Ordonnance N° :",
-        "created": "Créée le :",
-        "prescriber": "Prescripteur :",
-        "license": "N° Licence :",
-        "medications": "Médicaments",
-        "med_num": "N°",
-        "medication": "Médicament",
-        "dosage": "Posologie",
-        "route": "Voie",
-        "frequency": "Fréquence",
-        "duration": "Durée",
-        "instructions": "Instructions",
-        "no_medications": "Aucun médicament listé.",
-        "additional_notes": "Notes supplémentaires",
-        "signature": "Signature du prescripteur",
-        "date": "Date :",
-        "stamp": "Cachet",
-    },
+    "title": "ORDONNANCE MÉDICALE",
+    "patient": "Patient :",
+    "code": "Code :",
+    "visit_date": "Date de visite :",
+    "prescription_num": "Ordonnance N° :",
+    "created": "Créée le :",
+    "prescriber": "Prescripteur :",
+    "license": "N° Licence :",
+    "department": "Service :",
+    "specialty": "Spécialité :",
+    "medications": "Médicaments",
+    "med_num": "N°",
+    "medication": "Médicament",
+    "dosage": "Posologie",
+    "route": "Voie",
+    "frequency": "Fréquence",
+    "duration": "Durée",
+    "instructions": "Instructions",
+    "no_medications": "Aucun médicament listé.",
+    "additional_notes": "Notes supplémentaires",
+    "signature": "Signature du prescripteur",
+    "date": "Date :",
+    "stamp": "Cachet",
 }
 
 
@@ -111,7 +88,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         .prefetch_related("items__medication")
         .order_by("-created_at")
     )
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsDoctorOnly]
 
     def get_queryset(self):
         """
@@ -156,16 +133,11 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"])
     def pdf(self, request, pk=None):
         """
-        GET /api/prescriptions/{id}/pdf/?lang=fr
-        Returns a bilingual PDF (French or English).
+        GET /api/prescriptions/{id}/pdf/
+        Returns a PDF prescription in French.
         """
         rx = self.get_object()
-
-        # Get language from query param (default to French)
-        lang = request.query_params.get("lang", "fr")
-        if lang not in PDF_TRANSLATIONS:
-            lang = "fr"
-        t = PDF_TRANSLATIONS[lang]
+        t = PDF_TRANSLATIONS
 
         # Get prescriber info (current user making the request)
         user = request.user
@@ -173,11 +145,16 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         if prescriber_name == "Dr.":
             prescriber_name = f"Dr. {user.username}"
 
-        # Try to get license number from profile
+        # Try to get profile info (license, department, specialty)
         license_number = ""
+        department = ""
+        specialty = ""
         try:
-            if hasattr(user, 'profile') and user.profile.license_number:
-                license_number = user.profile.license_number
+            if hasattr(user, 'profile'):
+                profile = user.profile
+                license_number = profile.license_number or ""
+                department = profile.department or ""
+                specialty = profile.specialization or ""
         except Exception:
             pass
 
@@ -197,16 +174,24 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
-            fontSize=18,
+            fontSize=16,
             spaceAfter=6,
-            textColor=colors.HexColor('#10b981'),
+            alignment=1,  # Center
+            textColor=colors.HexColor('#1f2937'),
         )
-        subtitle_style = ParagraphStyle(
-            'CustomSubtitle',
+        doctor_name_style = ParagraphStyle(
+            'DoctorName',
+            parent=styles['Normal'],
+            fontSize=12,
+            fontName='Helvetica-Bold',
+            spaceAfter=2,
+        )
+        doctor_info_style = ParagraphStyle(
+            'DoctorInfo',
             parent=styles['Normal'],
             fontSize=10,
-            textColor=colors.grey,
-            spaceAfter=12,
+            textColor=colors.HexColor('#4b5563'),
+            spaceAfter=1,
         )
         heading_style = ParagraphStyle(
             'CustomHeading',
@@ -226,9 +211,18 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         # Build content
         content = []
 
-        # Header
-        content.append(Paragraph("ClinicFlowHQ", title_style))
-        content.append(Paragraph(t["title"], subtitle_style))
+        # Doctor info at top left
+        content.append(Paragraph(prescriber_name, doctor_name_style))
+        if department:
+            content.append(Paragraph(f"{t['department']} {department}", doctor_info_style))
+        if specialty:
+            content.append(Paragraph(f"{t['specialty']} {specialty}", doctor_info_style))
+        if license_number:
+            content.append(Paragraph(f"{t['license']} {license_number}", doctor_info_style))
+        content.append(Spacer(1, 15))
+
+        # Title centered
+        content.append(Paragraph(t["title"], title_style))
         content.append(Spacer(1, 10))
 
         # Prescription info
