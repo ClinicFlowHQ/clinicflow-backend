@@ -19,7 +19,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from .models import Medication, Prescription, PrescriptionTemplate
-from .permissions import IsStaffOrReadOnly, IsDoctorOnly
+from .permissions import IsStaffOrReadOnly, IsDoctorOnly, IsAuthenticatedStaffRole
 from .serializers import (
     MedicationSerializer,
     PrescriptionSerializer,
@@ -62,7 +62,7 @@ PDF_TRANSLATIONS = {
 class MedicationViewSet(viewsets.ModelViewSet):
     queryset = Medication.objects.all().order_by("name")
     serializer_class = MedicationSerializer
-    permission_classes = [IsStaffOrReadOnly]
+    permission_classes = [IsAuthenticatedStaffRole]
     filter_backends = [SearchFilter]
     search_fields = ["name", "strength", "form"]
 

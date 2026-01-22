@@ -30,3 +30,24 @@ class IsDoctorOnly(BasePermission):
             return hasattr(request.user, 'profile') and request.user.profile.role == 'doctor'
         except Exception:
             return False
+
+
+class IsAuthenticatedStaffRole(BasePermission):
+    """
+    - Authenticated users can READ (GET/HEAD/OPTIONS)
+    - Doctors, Admins, and Nurses can WRITE (POST/PATCH/PUT/DELETE)
+    """
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        if request.method in SAFE_METHODS:
+            return True
+
+        # Doctors, admins, and nurses can create/update/delete
+        try:
+            if hasattr(request.user, 'profile'):
+                return request.user.profile.role in ['doctor', 'admin', 'nurse']
+            return False
+        except Exception:
+            return False
