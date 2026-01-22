@@ -63,7 +63,7 @@ class PatientNestedSerializer(serializers.Serializer):
 # Shows patient name + visit number alongside each saved prescription.
 class PrescriptionListSerializer(serializers.ModelSerializer):
     visit_id = serializers.SerializerMethodField()
-    patient_id = serializers.IntegerField(source="patient.id", read_only=True)
+    patient_id = serializers.SerializerMethodField()
     patient_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -79,6 +79,9 @@ class PrescriptionListSerializer(serializers.ModelSerializer):
 
     def get_visit_id(self, obj):
         return obj.visit.id if obj.visit else None
+
+    def get_patient_id(self, obj):
+        return obj.patient.id if obj.patient else None
 
     def get_patient_name(self, obj):
         patient = obj.patient
