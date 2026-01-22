@@ -1,4 +1,5 @@
 # prescriptions/views.py
+import logging
 from io import BytesIO
 
 from django.http import HttpResponse
@@ -8,6 +9,8 @@ from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+
+logger = logging.getLogger(__name__)
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -134,6 +137,21 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         if self.action == "retrieve":
             return PrescriptionDetailSerializer
         return PrescriptionSerializer
+
+    def list(self, request, *args, **kwargs):
+        try:
+            return super().list(request, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error listing prescriptions: {e}", exc_info=True)
+            raise
+
+    def create(self, request, *args, **kwargs):
+        try:
+            logger.info(f"Creating prescription with data: {request.data}")
+            return super().create(request, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error creating prescription: {e}", exc_info=True)
+            raise
 
     @action(detail=True, methods=["get"])
     def pdf(self, request, pk=None):
