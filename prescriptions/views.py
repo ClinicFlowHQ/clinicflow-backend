@@ -213,21 +213,12 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         # Build content
         content = []
 
-        # Doctor info at top left
-        content.append(Paragraph(prescriber_name, doctor_name_style))
-        if department:
-            content.append(Paragraph(f"{t['department']} {department}", doctor_info_style))
-        if specialty:
-            content.append(Paragraph(f"{t['specialty']} {specialty}", doctor_info_style))
-        if license_number:
-            content.append(Paragraph(f"{t['license']} {license_number}", doctor_info_style))
-        # Bio with newlines preserved
+        # Doctor bio at top left (with newlines preserved)
         if bio:
-            content.append(Spacer(1, 5))
             for line in bio.split('\n'):
                 if line.strip():
                     content.append(Paragraph(line.strip(), doctor_info_style))
-        content.append(Spacer(1, 15))
+            content.append(Spacer(1, 15))
 
         # Title centered
         content.append(Paragraph(t["title"], title_style))
