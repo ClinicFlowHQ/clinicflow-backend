@@ -18,6 +18,9 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
+from datetime import date
+from django.utils import timezone
+
 from .models import Medication, Prescription, PrescriptionTemplate
 from .permissions import IsStaffOrReadOnly, IsDoctorOnly, IsAuthenticatedStaffRole
 from .serializers import (
@@ -34,7 +37,12 @@ from .serializers import (
 # PDF translations (French only)
 PDF_TRANSLATIONS = {
     "title": "ORDONNANCE MÉDICALE",
-    "patient": "Patient :",
+    "first_name": "Prénom :",
+    "last_name": "Nom :",
+    "age": "Âge :",
+    "weight": "Poids :",
+    "years": "ans",
+    "months": "mois",
     "code": "Code :",
     "visit_date": "Date de visite :",
     "prescription_num": "Ordonnance N° :",
@@ -252,24 +260,45 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
         # Prescription info
         patient = rx.patient
-        patient_name = f"{patient.first_name} {patient.last_name}"
         patient_code = getattr(patient, 'patient_code', None) or "-"
         created_date = rx.created_at.strftime("%d/%m/%Y %H:%M") if rx.created_at else "-"
 
-        # Patient info table (removed visit date and prescription number per user request)
+        # Calculate patient age
+        def calculate_age(birth_date):
+            today = date.today()
+            years = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+            if years < 2:
+                # For children under 2, show months
+                months = (today.year - birth_date.year) * 12 + today.month - birth_date.month
+                if today.day < birth_date.day:
+                    months -= 1
+                return f"{months} {t['months']}"
+            return f"{years} {t['years']}"
+
+        patient_age = calculate_age(patient.date_of_birth) if patient.date_of_birth else "-"
+
+        # Get latest weight from vitals (if visit is linked)
+        patient_weight = "-"
+        if rx.visit:
+            latest_vitals = rx.visit.vital_signs.order_by("-measured_at").first()
+            if latest_vitals and latest_vitals.weight_kg is not None:
+                patient_weight = f"{latest_vitals.weight_kg} kg"
+
+        # Patient info table with first name, last name, age, weight
         patient_data = [
-            [t["patient"], patient_name, t["code"], patient_code],
+            [t["first_name"], patient.first_name, t["last_name"], patient.last_name],
+            [t["age"], patient_age, t["weight"], patient_weight],
             [t["created"], created_date, "", ""],
         ]
-        patient_table = Table(patient_data, colWidths=[80, 140, 80, 90])
+        patient_table = Table(patient_data, colWidths=[70, 140, 70, 120])
         patient_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
             ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
             ('TEXTCOLOR', (2, 0), (2, -1), colors.grey),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
         ]))
         content.append(patient_table)
         content.append(Spacer(1, 15))
