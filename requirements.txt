@@ -13,3 +13,5 @@ whitenoise==6.8.2
 psycopg2-binary==2.9.10
 reportlab==4.2.5
 Pillow==11.0.0
+django-storages==1.14.4
+boto3==1.35.86
