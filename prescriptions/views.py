@@ -40,7 +40,7 @@ PDF_TRANSLATIONS = {
     "prescription_num": "Ordonnance N° :",
     "created": "Créée le :",
     "prescriber": "Prescripteur :",
-    "license": "N° Licence :",
+    "license": "N°COM :",
     "department": "Service :",
     "specialty": "Spécialité :",
     "medications": "Médicaments",
@@ -55,6 +55,7 @@ PDF_TRANSLATIONS = {
     "additional_notes": "Notes supplémentaires",
     "signature": "Signature du prescripteur",
     "date": "Date :",
+    "location": "Lieu :",
     "stamp": "Cachet",
 }
 
@@ -145,11 +146,12 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         if prescriber_name == "Dr.":
             prescriber_name = f"Dr. {user.username}"
 
-        # Try to get profile info (license, department, specialty, bio)
+        # Try to get profile info (license, department, specialty, bio, clinic_address)
         license_number = ""
         department = ""
         specialty = ""
         bio = ""
+        clinic_address = ""
         try:
             if hasattr(user, 'profile'):
                 profile = user.profile
@@ -157,6 +159,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 department = profile.department or ""
                 specialty = profile.specialization or ""
                 bio = profile.bio or ""
+                clinic_address = profile.clinic_address or ""
         except Exception:
             pass
 
@@ -228,13 +231,11 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         patient = rx.patient
         patient_name = f"{patient.first_name} {patient.last_name}"
         patient_code = getattr(patient, 'patient_code', None) or "-"
-        visit_date = rx.visit.visit_date.strftime("%d/%m/%Y %H:%M") if rx.visit and rx.visit.visit_date else "-"
         created_date = rx.created_at.strftime("%d/%m/%Y %H:%M") if rx.created_at else "-"
 
-        # Patient info table
+        # Patient info table (removed visit date and prescription number per user request)
         patient_data = [
             [t["patient"], patient_name, t["code"], patient_code],
-            [t["visit_date"], visit_date, t["prescription_num"], str(rx.id)],
             [t["created"], created_date, "", ""],
         ]
         patient_table = Table(patient_data, colWidths=[80, 140, 80, 90])
@@ -312,6 +313,10 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         if license_number:
             prescriber_data.append([t["license"], license_number])
         prescriber_data.append([t["date"], created_date])
+        if clinic_address:
+            # Join multiline address with commas for single-line display
+            address_single_line = ", ".join(line.strip() for line in clinic_address.split('\n') if line.strip())
+            prescriber_data.append([t["location"], address_single_line])
 
         prescriber_table = Table(prescriber_data, colWidths=[100, 200])
         prescriber_table.setStyle(TableStyle([

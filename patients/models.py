@@ -45,3 +45,54 @@ class Patient(models.Model):
 
     def __str__(self):
         return f"{self.last_name} {self.first_name}"
+
+
+def patient_file_path(instance, filename):
+    """Generate upload path: patient_files/patient_<id>/<filename>"""
+    return f"patient_files/patient_{instance.patient.id}/{filename}"
+
+
+class PatientFile(models.Model):
+    CATEGORY_CHOICES = [
+        ("lab_result", "Lab Result"),
+        ("imaging", "Imaging (X-ray, MRI, etc.)"),
+        ("prescription", "Prescription"),
+        ("consent", "Consent Form"),
+        ("insurance", "Insurance Document"),
+        ("other", "Other"),
+    ]
+
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="files"
+    )
+    file = models.FileField(upload_to=patient_file_path)
+    original_filename = models.CharField(max_length=255)
+    file_size = models.PositiveIntegerField(help_text="File size in bytes")
+    file_type = models.CharField(max_length=100, help_text="MIME type")
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        default="other"
+    )
+    description = models.TextField(blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="uploaded_files"
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+
+    def __str__(self):
+        return f"{self.original_filename} ({self.patient})"
+
+    def delete(self, *args, **kwargs):
+        # Delete the file from storage when model is deleted
+        if self.file:
+            self.file.delete(save=False)
+        super().delete(*args, **kwargs)

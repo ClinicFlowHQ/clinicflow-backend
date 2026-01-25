@@ -1,15 +1,18 @@
 # patients/views.py
 from django.db.models import Max, Min, Q
+from django.http import FileResponse
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from rest_framework import generics, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework import generics, status, viewsets
+from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from .models import Patient
-from .serializers import PatientSerializer
+from .models import Patient, PatientFile
+from .serializers import PatientSerializer, PatientFileSerializer
 from .pagination import PatientPagination
 
 
@@ -161,3 +164,44 @@ def restore_patient(request, pk):
     patient.is_active = True
     patient.save()
     return Response({"detail": "Patient restored successfully."})
+
+
+class PatientFileViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing patient files.
+
+    Endpoints:
+    - GET    /api/patients/{patient_id}/files/          - List files
+    - POST   /api/patients/{patient_id}/files/          - Upload file
+    - GET    /api/patients/{patient_id}/files/{id}/     - Get file details
+    - DELETE /api/patients/{patient_id}/files/{id}/     - Delete file
+    - GET    /api/patients/{patient_id}/files/{id}/download/ - Download file
+    """
+    serializer_class = PatientFileSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        patient_id = self.kwargs.get('patient_id')
+        return PatientFile.objects.filter(patient_id=patient_id)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+    def perform_create(self, serializer):
+        patient_id = self.kwargs.get('patient_id')
+        patient = get_object_or_404(Patient, pk=patient_id)
+        serializer.save(patient=patient)
+
+    @action(detail=True, methods=['get'])
+    def download(self, request, patient_id=None, pk=None):
+        """Download the file."""
+        file_obj = self.get_object()
+        response = FileResponse(
+            file_obj.file.open('rb'),
+            content_type=file_obj.file_type
+        )
+        response['Content-Disposition'] = f'attachment; filename="{file_obj.original_filename}"'
+        return response

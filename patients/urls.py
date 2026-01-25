@@ -1,9 +1,22 @@
-from django.urls import path
-from .views import PatientListCreateView, PatientDetailView, archive_patient, restore_patient
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import (
+    PatientListCreateView,
+    PatientDetailView,
+    archive_patient,
+    restore_patient,
+    PatientFileViewSet,
+)
+
+# Router for nested file resources
+file_router = DefaultRouter()
+file_router.register(r'files', PatientFileViewSet, basename='patient-files')
 
 urlpatterns = [
     path("", PatientListCreateView.as_view(), name="patient_list_create"),
     path("<int:pk>/", PatientDetailView.as_view(), name="patient_detail"),
     path("<int:pk>/archive/", archive_patient, name="patient_archive"),
     path("<int:pk>/restore/", restore_patient, name="patient_restore"),
+    # Nested file routes: /api/patients/<patient_id>/files/
+    path("<int:patient_id>/", include(file_router.urls)),
 ]

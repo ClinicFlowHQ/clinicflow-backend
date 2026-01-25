@@ -54,6 +54,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'department',
             'hire_date',
             'bio',
+            'clinic_address',
             'avatar',
             'created_at',
             'updated_at',
@@ -102,6 +103,7 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
     department = serializers.CharField(max_length=100, required=False, allow_blank=True)
     hire_date = serializers.DateField(required=False, allow_null=True)
     bio = serializers.CharField(required=False, allow_blank=True)
+    clinic_address = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = User
@@ -115,6 +117,7 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
             'department',
             'hire_date',
             'bio',
+            'clinic_address',
         ]
 
     def update(self, instance, validated_data):
@@ -130,7 +133,7 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
             user=instance,
             defaults={'role': 'admin' if instance.is_superuser else 'nurse'}
         )
-        profile_fields = ['phone', 'specialization', 'license_number', 'department', 'hire_date', 'bio']
+        profile_fields = ['phone', 'specialization', 'license_number', 'department', 'hire_date', 'bio', 'clinic_address']
         for field in profile_fields:
             if field in validated_data:
                 setattr(profile, field, validated_data.pop(field))
