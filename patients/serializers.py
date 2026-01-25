@@ -90,6 +90,8 @@ class PatientSerializer(serializers.ModelSerializer):
     # annotations (not DB fields) → read-only
     last_visit_date = serializers.DateTimeField(read_only=True)
     next_visit_date = serializers.DateTimeField(read_only=True)
+    latest_weight_kg = serializers.SerializerMethodField(read_only=True)
+    last_visit_id = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Patient
@@ -106,6 +108,8 @@ class PatientSerializer(serializers.ModelSerializer):
             "created_at",
             "last_visit_date",
             "next_visit_date",
+            "latest_weight_kg",
+            "last_visit_id",
         ]
         read_only_fields = [
             "id",
@@ -113,4 +117,33 @@ class PatientSerializer(serializers.ModelSerializer):
             "created_at",
             "last_visit_date",
             "next_visit_date",
+            "latest_weight_kg",
+            "last_visit_id",
         ]
+
+    def get_latest_weight_kg(self, obj):
+        """Get the most recent weight from patient's visit vitals."""
+        from visits.models import VitalSign
+        latest_vital = (
+            VitalSign.objects
+            .filter(visit__patient=obj, weight_kg__isnull=False)
+            .order_by('-measured_at')
+            .first()
+        )
+        if latest_vital:
+            return latest_vital.weight_kg
+        return None
+
+    def get_last_visit_id(self, obj):
+        """Get the ID of the most recent past visit."""
+        from visits.models import Visit
+        from django.utils import timezone
+        last_visit = (
+            Visit.objects
+            .filter(patient=obj, visit_date__lte=timezone.now())
+            .order_by('-visit_date')
+            .first()
+        )
+        if last_visit:
+            return last_visit.id
+        return None
