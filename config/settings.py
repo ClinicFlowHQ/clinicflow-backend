@@ -7,6 +7,7 @@ Production-ready for Render deployment.
 from datetime import timedelta
 from pathlib import Path
 import os
+import sys
 
 from django.utils.translation import gettext_lazy as _
 from dotenv import load_dotenv
@@ -21,11 +22,15 @@ load_dotenv(BASE_DIR / ".env")
 # SECURITY
 # =============================================================================
 # Support both naming conventions (Render uses SECRET_KEY, local might use DJANGO_SECRET_KEY)
-SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("DJANGO_SECRET_KEY") or "unsafe-dev-key"
+SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("DJANGO_SECRET_KEY") or "unsafe-dev-key-change-me"
 
 # Default to False for production safety
 _debug_val = os.getenv("DEBUG") or os.getenv("DJANGO_DEBUG") or "False"
 DEBUG = _debug_val.lower() in ("true", "1", "yes")
+
+# Print debug info at startup (visible in Render logs)
+print(f"[SETTINGS] DEBUG={DEBUG}", file=sys.stderr)
+print(f"[SETTINGS] SECRET_KEY set: {bool(os.getenv('SECRET_KEY') or os.getenv('DJANGO_SECRET_KEY'))}", file=sys.stderr)
 
 # =============================================================================
 # ALLOWED_HOSTS
@@ -36,9 +41,10 @@ render_hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
 # Base hosts for local development
 ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 
-# Add Render hostname if present
+# Add Render hostname if present (critical for production)
 if render_hostname:
     ALLOWED_HOSTS.append(render_hostname)
+    print(f"[SETTINGS] Added RENDER_EXTERNAL_HOSTNAME: {render_hostname}", file=sys.stderr)
 
 # Add any extra hosts from environment (comma-separated)
 extra_hosts = os.getenv("ALLOWED_HOSTS", "")
@@ -46,6 +52,8 @@ for host in extra_hosts.split(","):
     host = host.strip()
     if host and host not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(host)
+
+print(f"[SETTINGS] ALLOWED_HOSTS={ALLOWED_HOSTS}", file=sys.stderr)
 
 # =============================================================================
 # CORS - Critical for frontend API calls
@@ -59,12 +67,14 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 # Add production frontend URL(s) from environment
-# Set CORS_ALLOWED_ORIGINS on Render: https://your-frontend.onrender.com
+# MUST SET ON RENDER: CORS_ALLOWED_ORIGINS=https://frontend-4boy.onrender.com
 cors_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
 for origin in cors_env.split(","):
     origin = origin.strip()
     if origin and origin not in CORS_ALLOWED_ORIGINS:
         CORS_ALLOWED_ORIGINS.append(origin)
+
+print(f"[SETTINGS] CORS_ALLOWED_ORIGINS={CORS_ALLOWED_ORIGINS}", file=sys.stderr)
 
 # Allow credentials (cookies, authorization headers)
 CORS_ALLOW_CREDENTIALS = True
@@ -85,16 +95,21 @@ CORS_ALLOW_HEADERS = [
 # =============================================================================
 # CSRF - For admin and session-based auth
 # =============================================================================
-# Trusted origins for CSRF (needed for admin in production)
+# Trusted origins for CSRF (needed for admin login in production)
 CSRF_TRUSTED_ORIGINS = []
+
+# Add Render backend URL for admin access
 if render_hostname:
     CSRF_TRUSTED_ORIGINS.append(f"https://{render_hostname}")
 
+# Add from environment (comma-separated full URLs with https://)
 csrf_env = os.getenv("CSRF_TRUSTED_ORIGINS", "")
 for origin in csrf_env.split(","):
     origin = origin.strip()
     if origin and origin not in CSRF_TRUSTED_ORIGINS:
         CSRF_TRUSTED_ORIGINS.append(origin)
+
+print(f"[SETTINGS] CSRF_TRUSTED_ORIGINS={CSRF_TRUSTED_ORIGINS}", file=sys.stderr)
 
 # =============================================================================
 # INSTALLED APPS
@@ -170,6 +185,8 @@ DATABASES = {
     )
 }
 
+print(f"[SETTINGS] DATABASE: {DATABASES['default'].get('ENGINE', 'unknown')}", file=sys.stderr)
+
 # =============================================================================
 # AUTH
 # =============================================================================
@@ -204,7 +221,6 @@ TIME_ZONE = CLINIC_TIMEZONE
 # =============================================================================
 # STATIC FILES - WhiteNoise for production
 # =============================================================================
-# CRITICAL: Must have leading slash for proper URL generation
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = []
@@ -216,7 +232,7 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
 
 # =============================================================================
-# STORAGES - Django 4.2+ unified configuration (fixes admin CSS)
+# STORAGES - Django 4.2+ unified configuration
 # =============================================================================
 # Cloudflare R2 settings (optional)
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
@@ -224,9 +240,9 @@ R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "clinicflow")
 R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
 
-# Always define STORAGES dict (required for WhiteNoise + Django 4.2+)
+# Use simpler static files storage that doesn't require manifest
+# CompressedManifestStaticFilesStorage can fail if manifest is missing
 if R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ENDPOINT_URL:
-    # Production with R2: use R2 for media, WhiteNoise for static
     STORAGES = {
         "default": {
             "BACKEND": "storages.backends.s3.S3Storage",
@@ -242,18 +258,19 @@ if R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ENDPOINT_URL:
             },
         },
         "staticfiles": {
-            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+            "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
         },
     }
     MEDIA_URL = f"{R2_ENDPOINT_URL}/{R2_BUCKET_NAME}/"
 else:
-    # No R2: use local filesystem for media, WhiteNoise for static
     STORAGES = {
         "default": {
             "BACKEND": "django.core.files.storage.FileSystemStorage",
         },
         "staticfiles": {
-            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+            # Use CompressedStaticFilesStorage instead of CompressedManifestStaticFilesStorage
+            # This avoids manifest errors when files are missing
+            "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
         },
     }
     MEDIA_URL = "/media/"
@@ -297,14 +314,14 @@ AFRICASTALKING_API_KEY = os.getenv("AFRICASTALKING_API_KEY")
 AFRICASTALKING_SENDER_ID = os.getenv("AFRICASTALKING_SENDER_ID", "")
 
 # =============================================================================
-# LOGGING (useful for debugging SMS and cron jobs)
+# LOGGING - Essential for debugging on Render
 # =============================================================================
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
         "verbose": {
-            "format": "{levelname} {asctime} {module} {message}",
+            "format": "[{levelname}] {asctime} {name} {message}",
             "style": "{",
         },
     },
@@ -312,6 +329,7 @@ LOGGING = {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
+            "stream": "ext://sys.stderr",
         },
     },
     "root": {
@@ -319,6 +337,16 @@ LOGGING = {
         "level": "INFO",
     },
     "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
         "appointments": {
             "handlers": ["console"],
             "level": "DEBUG",
