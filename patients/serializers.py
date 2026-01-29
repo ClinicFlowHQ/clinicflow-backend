@@ -103,6 +103,7 @@ class PatientSerializer(serializers.ModelSerializer):
             "sex",
             "date_of_birth",
             "phone",
+            "email",
             "address",
             "is_active",
             "created_at",

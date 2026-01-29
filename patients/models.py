@@ -18,6 +18,9 @@ class Patient(models.Model):
     # Phone is optional (child may not have one)
     phone = models.CharField(max_length=30, blank=True)
 
+    # Email is optional
+    email = models.EmailField(blank=True, default="")
+
     # Address is required
     address = models.TextField()
 
