@@ -73,7 +73,7 @@ def build_sms_message(patient, scheduled_local):
         f"demain à {time_str} ({date_str}) avec le "
         f"Dr Mukwamu B. Justin (médecin pédiatre). "
         f"Merci d'arriver 10 minutes en avance. "
-        f"Cordialement, ClinicFlowHQ."
+        f"Cordialement, l'Equipe Clinique."
     )
 
 

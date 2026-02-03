@@ -11,7 +11,8 @@ Covers:
 """
 
 from datetime import datetime, time, timedelta, timezone as dt_timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from urllib.parse import parse_qs
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
@@ -551,3 +552,135 @@ class SendReminderCommandTest(TestCase):
         mock_send.assert_not_called()
         output = out.getvalue()
         self.assertIn("No reminders to send", output)
+
+
+# =========================================================================
+# SMS UTF-8 encoding (accented characters)
+# =========================================================================
+@override_settings(
+    AFRICASTALKING_USERNAME="sandbox",
+    AFRICASTALKING_API_KEY="test_api_key",
+    AFRICASTALKING_SENDER_ID="",
+)
+class SmsUtf8EncodingTest(TestCase):
+    """Verify that French accented characters survive the HTTP encoding round-trip."""
+
+    @patch("appointments.services.sms.http_requests.post")
+    def test_accented_message_preserved_in_post_body(self, mock_post):
+        """The POST body sent to AT must contain UTF-8 percent-encoded accents."""
+        # Simulate a successful AT response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "SMSMessageData": {
+                "Recipients": [{"status": "Success", "messageId": "ATXid_utf8"}]
+            }
+        }
+        mock_post.return_value = mock_response
+
+        french_msg = "Médecin pédiatre — février — l'Équipe Clinique"
+        result = send_sms("+243812345678", french_msg)
+
+        self.assertTrue(result["ok"])
+        mock_post.assert_called_once()
+
+        # Extract the `data` kwarg passed to requests.post
+        call_kwargs = mock_post.call_args
+        post_data = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
+
+        # data should be a dict (requests handles urlencode internally)
+        self.assertIsInstance(post_data, dict)
+        self.assertEqual(post_data["message"], french_msg)
+
+        # Verify that requests would encode this correctly:
+        # simulate what requests.post does with data=dict
+        from urllib.parse import urlencode
+        encoded = urlencode(post_data, encoding="utf-8")
+        # UTF-8 percent-encoding for é is %C3%A9
+        self.assertIn("%C3%A9", encoded)  # é in "Médecin"
+        # The decoded form must round-trip back to the original message
+        decoded = parse_qs(encoded, encoding="utf-8")
+        self.assertEqual(decoded["message"][0], french_msg)
+
+    @patch("appointments.services.sms.http_requests.post")
+    def test_content_type_includes_utf8_charset(self, mock_post):
+        """The Content-Type header must declare charset=UTF-8."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "SMSMessageData": {
+                "Recipients": [{"status": "Success", "messageId": "ATXid_hdr"}]
+            }
+        }
+        mock_post.return_value = mock_response
+
+        send_sms("+243812345678", "Test accentué")
+
+        call_kwargs = mock_post.call_args
+        headers = call_kwargs.kwargs.get("headers") or call_kwargs[1].get("headers")
+        content_type = headers.get("Content-Type", "")
+        self.assertIn("charset=UTF-8", content_type)
+
+    @patch("appointments.services.sms.http_requests.post")
+    def test_full_acceptance_message_round_trips(self, mock_post):
+        """The exact acceptance-test message must survive encoding intact."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "SMSMessageData": {
+                "Recipients": [{"status": "Success", "messageId": "ATXid_acc"}]
+            }
+        }
+        mock_post.return_value = mock_response
+
+        acceptance_msg = (
+            "Bonjour Tracy Masengu, rappel : votre rendez-vous est "
+            "demain à 16:30 (4 février 2026) avec le "
+            "Dr Mukwamu B. Justin (médecin pédiatre). "
+            "Merci d'arriver 10 minutes en avance. "
+            "Cordialement, l'Équipe Clinique."
+        )
+        result = send_sms("+243812345678", acceptance_msg)
+        self.assertTrue(result["ok"])
+
+        call_kwargs = mock_post.call_args
+        post_data = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
+
+        # The raw unicode message must be passed through as-is in the dict
+        self.assertEqual(post_data["message"], acceptance_msg)
+
+        # Prove every accented character survives urlencode → parse_qs round-trip
+        from urllib.parse import urlencode
+        encoded = urlencode(post_data, encoding="utf-8")
+        decoded = parse_qs(encoded, encoding="utf-8")
+        self.assertEqual(decoded["message"][0], acceptance_msg)
+
+        # Phone number with + must be in the payload (not mangled)
+        self.assertEqual(post_data["to"], "+243812345678")
+
+    @patch("appointments.services.sms.http_requests.post")
+    def test_non_json_response_handled_gracefully(self, mock_post):
+        """A non-JSON response from AT must not crash; error is captured."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError("No JSON")
+        mock_response.text = "<html>Gateway Error</html>"
+        mock_post.return_value = mock_response
+
+        result = send_sms("+243812345678", "Hello")
+
+        self.assertFalse(result["ok"])
+        self.assertIn("Invalid JSON", result["error"])
+
+    @patch("appointments.services.sms.http_requests.post")
+    def test_http_error_status_handled(self, mock_post):
+        """A 4xx/5xx response must not crash; error includes status code."""
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+        mock_post.return_value = mock_response
+
+        result = send_sms("+243812345678", "Hello")
+
+        self.assertFalse(result["ok"])
+        self.assertIn("HTTP 500", result["error"])

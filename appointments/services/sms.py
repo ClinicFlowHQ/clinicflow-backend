@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 SMS sending service using Africa's Talking.
 
@@ -7,48 +8,17 @@ Production-hardened:
 - Mask phone numbers in log output
 - Return structured result dict with message_id
 - Timeout protection via SDK (or fallback signal)
+- Forces UTF-8 encoding for French accented characters
 """
 
 import logging
 import re
-import threading
+
+import requests as http_requests
 
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Module-level SDK initialisation (thread-safe, runs at most once)
-# ---------------------------------------------------------------------------
-_at_sms = None
-_init_lock = threading.Lock()
-
-
-def _get_sms_service():
-    """Return the Africa's Talking SMS service object, initialised once."""
-    global _at_sms
-    if _at_sms is not None:
-        return _at_sms
-
-    with _init_lock:
-        # Double-check after acquiring lock
-        if _at_sms is not None:
-            return _at_sms
-
-        username = settings.AFRICASTALKING_USERNAME
-        api_key = settings.AFRICASTALKING_API_KEY
-
-        if not username or not api_key:
-            logger.error("Africa's Talking credentials not configured")
-            return None
-
-        import africastalking
-
-        africastalking.initialize(username, api_key)
-        _at_sms = africastalking.SMS
-        logger.info("Africa's Talking SDK initialised (username=%s)", username)
-        return _at_sms
-
 
 # ---------------------------------------------------------------------------
 # Phone number helpers
@@ -146,24 +116,69 @@ def send_sms(phone_number: str, message: str) -> dict:
     result["phone_normalised"] = normalised
     masked = mask_phone(normalised)
 
-    # --- Get SDK handle ---
-    sms_service = _get_sms_service()
-    if sms_service is None:
+    # --- Build request (direct HTTP POST for UTF-8 control) ---
+    # The AT Python SDK does not expose a Unicode/encoding parameter.
+    # Sending via requests directly with explicit UTF-8 Content-Type
+    # ensures accented French characters (é, è, à, ô …) are preserved.
+    username = settings.AFRICASTALKING_USERNAME
+    api_key = settings.AFRICASTALKING_API_KEY
+    sender_id = settings.AFRICASTALKING_SENDER_ID
+
+    if not username or not api_key:
         result["error"] = "SMS provider not configured"
+        logger.error("Africa's Talking credentials not configured")
         return result
 
-    # --- Build kwargs ---
-    sender_id = settings.AFRICASTALKING_SENDER_ID
-    kwargs = {
+    is_sandbox = (username == "sandbox")
+    api_url = (
+        "https://api.sandbox.africastalking.com/version1/messaging"
+        if is_sandbox
+        else "https://api.africastalking.com/version1/messaging"
+    )
+
+    payload = {
+        "username": username,
+        "to": normalised,
         "message": message,
-        "recipients": [normalised],
+        "bulkSMSMode": 1,
     }
     if sender_id:
-        kwargs["sender_id"] = sender_id
+        payload["from"] = sender_id
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "apiKey": api_key,
+    }
 
     # --- Send with timeout guard ---
     try:
-        response = sms_service.send(**kwargs)
+        # Pass payload as dict — requests.post encodes it via
+        # urllib.parse.urlencode which uses UTF-8 for non-ASCII chars.
+        # Combined with charset=UTF-8 in Content-Type, this ensures
+        # accented characters (é, è, à, ô …) are transmitted correctly.
+        resp = http_requests.post(
+            api_url,
+            data=payload,
+            headers=headers,
+            timeout=30,
+        )
+
+        # Handle non-2xx responses
+        if resp.status_code >= 400:
+            snippet = resp.text[:200] if resp.text else "(empty)"
+            result["error"] = f"HTTP {resp.status_code}: {snippet}"
+            logger.warning("SMS HTTP error for %s: %s %s", masked, resp.status_code, snippet)
+            return result
+
+        # Parse JSON safely
+        try:
+            response = resp.json()
+        except (ValueError, TypeError):
+            snippet = resp.text[:200] if resp.text else "(empty)"
+            result["error"] = f"Invalid JSON from provider: {snippet}"
+            logger.warning("SMS non-JSON response for %s: %s", masked, snippet)
+            return result
 
         # Africa's Talking response:
         # {"SMSMessageData": {"Recipients": [{"status": "Success", "messageId": "...", ...}]}}
