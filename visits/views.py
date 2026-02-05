@@ -15,11 +15,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 
 from .models import Visit, VitalSign
 from .serializers import VisitSerializer, VitalSignSerializer
-from patients.permissions import IsVisitOwnerOrAdmin, IsVitalSignOwnerOrAdmin
-
-
-def _is_admin(user):
-    return hasattr(user, 'profile') and user.profile.role == 'admin'
+from patients.permissions import IsVisitOwnerOrAdmin, IsVitalSignOwnerOrAdmin, _can_edit_visit
 
 
 # PDF translations (French only - for visit summary/discharge document)
@@ -125,14 +121,13 @@ class VitalSignListCreateAPIView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         """
-        Only the visit's creator or an admin can add vitals to that visit.
+        Only the visit's creator (or patient creator for legacy visits) or admin can add vitals.
         """
         visit = serializer.validated_data.get("visit")
         if not visit:
             raise PermissionDenied("Visit is required.")
 
-        user = self.request.user
-        if not _is_admin(user) and visit.created_by != user:
+        if not _can_edit_visit(self.request.user, visit):
             raise PermissionDenied("You do not have permission to add vitals to this visit.")
 
         serializer.save()
