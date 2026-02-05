@@ -5,6 +5,7 @@ from .views import (
     PatientDetailView,
     archive_patient,
     restore_patient,
+    latest_medical_history,
     PatientFileViewSet,
 )
 
@@ -17,6 +18,7 @@ urlpatterns = [
     path("<int:pk>/", PatientDetailView.as_view(), name="patient_detail"),
     path("<int:pk>/archive/", archive_patient, name="patient_archive"),
     path("<int:pk>/restore/", restore_patient, name="patient_restore"),
+    path("<int:patient_id>/latest-medical-history/", latest_medical_history, name="patient_latest_medical_history"),
     # Nested file routes: /api/patients/<patient_id>/files/
     path("<int:patient_id>/", include(file_router.urls)),
 ]

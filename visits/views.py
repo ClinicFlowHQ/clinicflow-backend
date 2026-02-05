@@ -15,6 +15,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 
 from .models import Visit, VitalSign
 from .serializers import VisitSerializer, VitalSignSerializer
+from patients.permissions import IsVisitOwnerOrAdmin, IsVitalSignOwnerOrAdmin, _can_edit_visit
 
 
 # PDF translations (French only - for visit summary/discharge document)
@@ -75,21 +76,23 @@ class VisitListCreateAPIView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         """
         Any authenticated user can create a visit for any patient.
+        The visit's created_by is set to the current user (the doctor creating it).
         """
         patient = serializer.validated_data.get("patient")
         if not patient:
             raise PermissionDenied("Patient is required.")
 
-        serializer.save()
+        # Save with current user as visit owner
+        serializer.save(created_by=self.request.user)
 
 
 class VisitDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = VisitSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsVisitOwnerOrAdmin]
 
     def get_queryset(self):
         # All authenticated staff can access any visit
-        return Visit.objects.select_related("patient", "patient__created_by")
+        return Visit.objects.select_related("patient", "created_by")
 
 
 class VitalSignListCreateAPIView(generics.ListCreateAPIView):
@@ -118,18 +121,21 @@ class VitalSignListCreateAPIView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         """
-        Any authenticated user can add vitals to any visit.
+        Only the visit's creator (or patient creator for legacy visits) or admin can add vitals.
         """
         visit = serializer.validated_data.get("visit")
         if not visit:
             raise PermissionDenied("Visit is required.")
+
+        if not _can_edit_visit(self.request.user, visit):
+            raise PermissionDenied("You do not have permission to add vitals to this visit.")
 
         serializer.save()
 
 
 class VitalSignDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = VitalSignSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsVitalSignOwnerOrAdmin]
 
     def get_queryset(self):
         # All authenticated staff can access any vital sign

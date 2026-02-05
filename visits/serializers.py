@@ -30,6 +30,12 @@ class VisitSerializer(serializers.ModelSerializer):
     # ✅ Added for dropdown labels
     patient_name = serializers.SerializerMethodField()
 
+    # ✅ Added for ownership check (returns user ID)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    # ✅ Added for legacy visit fallback (patient's creator ID)
+    patient_created_by = serializers.SerializerMethodField()
+
     def get_patient_name(self, obj):
         p = getattr(obj, "patient", None)
         if not p:
@@ -39,12 +45,20 @@ class VisitSerializer(serializers.ModelSerializer):
         name = f"{fn} {ln}".strip()
         return name or None
 
+    def get_patient_created_by(self, obj):
+        p = getattr(obj, "patient", None)
+        if not p:
+            return None
+        return getattr(p, "created_by_id", None)
+
     class Meta:
         model = Visit
         fields = [
             "id",
             "patient",
-            "patient_name",  # ✅ added
+            "patient_name",       # ✅ added
+            "created_by",         # ✅ added for ownership check
+            "patient_created_by", # ✅ added for legacy fallback
             "visit_date",
             "visit_type",
             "chief_complaint",
@@ -60,4 +74,4 @@ class VisitSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "vital_signs"]
+        read_only_fields = ["id", "created_by", "created_at", "updated_at", "vital_signs"]

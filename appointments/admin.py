@@ -1,7 +1,7 @@
 from django.contrib import admin, messages
 from django.utils import timezone
 
-from .models import Appointment
+from .models import Appointment, AppointmentSMSLog
 from visits.models import Visit
 
 
@@ -105,13 +105,25 @@ def create_visit_from_appointment(modeladmin, request, queryset):
         )
 
 
+class SMSLogInline(admin.TabularInline):
+    model = AppointmentSMSLog
+    extra = 0
+    readonly_fields = ("phone", "provider", "status", "message_id", "error_message", "created_at")
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(Appointment)
 class AppointmentAdmin(admin.ModelAdmin):
-    list_display = ("id", "patient", "scheduled_at", "status", "visit")
-    list_filter = ("status", "scheduled_at")
+    list_display = ("id", "patient", "scheduled_at", "status", "reminders_enabled", "reminder_sent_at", "visit")
+    list_filter = ("status", "scheduled_at", "reminders_enabled")
     search_fields = ("patient__first_name", "patient__last_name", "reason")
     autocomplete_fields = ("patient", "visit")
     ordering = ("-scheduled_at",)
+    readonly_fields = ("reminder_sent_at",)
+    inlines = [SMSLogInline]
 
     actions = [
         mark_confirmed,
@@ -120,3 +132,18 @@ class AppointmentAdmin(admin.ModelAdmin):
         mark_completed,
         create_visit_from_appointment,
     ]
+
+
+@admin.register(AppointmentSMSLog)
+class AppointmentSMSLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "appointment", "phone", "status", "message_id", "created_at")
+    list_filter = ("status", "provider", "created_at")
+    search_fields = ("phone", "message_id", "appointment__patient__last_name")
+    readonly_fields = ("appointment", "phone", "provider", "status", "message_id", "error_message", "created_at")
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

@@ -11,6 +11,7 @@ class Appointment(models.Model):
         ("CANCELLED", "Cancelled"),
         ("COMPLETED", "Completed"),
         ("NO_SHOW", "No-show"),
+        ("RESCHEDULED", "Rescheduled"),
     )
 
     patient = models.ForeignKey(
@@ -48,6 +49,10 @@ class Appointment(models.Model):
         related_name="appointment",
     )
 
+    # SMS reminder settings
+    reminders_enabled = models.BooleanField(default=False)
+    reminder_sent_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -56,11 +61,16 @@ class Appointment(models.Model):
         indexes = [
             models.Index(fields=["scheduled_at"]),
             models.Index(fields=["status"]),
+            # Optimise the daily reminder query
+            models.Index(
+                fields=["reminders_enabled", "reminder_sent_at", "scheduled_at", "status"],
+                name="idx_reminder_query",
+            ),
         ]
 
     def clean(self):
         # Prevent creating/updating to the past (except if already completed/cancelled)
-        if self.scheduled_at and self.status in {"SCHEDULED", "CONFIRMED"}:
+        if self.scheduled_at and self.status in {"SCHEDULED", "CONFIRMED", "RESCHEDULED"}:
             if self.scheduled_at < timezone.now():
                 raise ValidationError({"scheduled_at": "Appointment cannot be in the past."})
 
@@ -70,3 +80,39 @@ class Appointment(models.Model):
 
     def __str__(self):
         return f"Appointment #{self.id} - {self.patient} - {self.scheduled_at:%Y-%m-%d %H:%M}"
+
+
+class AppointmentSMSLog(models.Model):
+    """
+    Immutable log of every SMS send attempt for appointment reminders.
+    One row per attempt — successful or failed.
+    """
+
+    STATUS_CHOICES = (
+        ("SUCCESS", "Success"),
+        ("FAILED", "Failed"),
+    )
+
+    appointment = models.ForeignKey(
+        Appointment,
+        on_delete=models.CASCADE,
+        related_name="sms_logs",
+    )
+    phone = models.CharField(max_length=30, help_text="E.164 phone number sent to")
+    provider = models.CharField(max_length=30, default="africastalking")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES)
+    message_id = models.CharField(
+        max_length=100, blank=True, default="",
+        help_text="Provider message ID for delivery tracking",
+    )
+    error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["appointment", "status"]),
+        ]
+
+    def __str__(self):
+        return f"SMS {self.status} → {self.phone} (appt #{self.appointment_id})"
