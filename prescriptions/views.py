@@ -69,11 +69,18 @@ PDF_TRANSLATIONS = {
 
 
 class MedicationViewSet(viewsets.ModelViewSet):
-    queryset = Medication.objects.all().order_by("name")
+    queryset = Medication.objects.filter(is_active=True).order_by("name")
     serializer_class = MedicationSerializer
     permission_classes = [IsAuthenticatedStaffRole]
     filter_backends = [SearchFilter]
     search_fields = ["name", "strength", "form"]
+
+    def destroy(self, request, *args, **kwargs):
+        """Soft-delete: deactivate medication instead of hard-deleting."""
+        medication = self.get_object()
+        medication.is_active = False
+        medication.save(update_fields=["is_active"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class PrescriptionTemplateViewSet(viewsets.ModelViewSet):
