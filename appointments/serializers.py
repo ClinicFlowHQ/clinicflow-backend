@@ -11,7 +11,7 @@ class PatientSerializer(serializers.ModelSerializer):
     """Minimal serializer for patient info in appointments."""
     class Meta:
         model = Patient
-        fields = ["id", "patient_code", "first_name", "last_name"]
+        fields = ["id", "patient_code", "first_name", "last_name", "phone"]
 
 
 class DoctorSerializer(serializers.ModelSerializer):
@@ -33,6 +33,19 @@ class DoctorSerializer(serializers.ModelSerializer):
 
 
 class AppointmentSerializer(serializers.ModelSerializer):
+    """
+    Appointment serializer with SMS reminder fields.
+
+    Reminder behavior:
+    - reminders_enabled: User can toggle ON/OFF at any time
+    - reminder_sent_at: Read-only timestamp of when SMS was sent
+
+    When user toggles reminders_enabled ON after SMS was already sent,
+    reminder_sent_at is NOT cleared (no duplicate SMS). The cron job
+    only sends SMS if reminders_enabled=True AND reminder_sent_at IS NULL.
+
+    To "reset" and allow re-sending, admin must clear reminder_sent_at manually.
+    """
     doctor_details = DoctorSerializer(source='doctor', read_only=True)
     patient = PatientSerializer(read_only=True)
     patient_id = serializers.PrimaryKeyRelatedField(
@@ -54,10 +67,12 @@ class AppointmentSerializer(serializers.ModelSerializer):
             "reason",
             "notes",
             "visit",
+            "reminders_enabled",
+            "reminder_sent_at",  # Read-only: shows when SMS was sent
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "reminder_sent_at", "created_at", "updated_at"]
 
     def create(self, validated_data):
         try:

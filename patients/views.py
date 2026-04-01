@@ -14,6 +14,9 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from .models import Patient, PatientFile
 from .serializers import PatientSerializer, PatientFileSerializer
 from .pagination import PatientPagination
+from .permissions import IsPatientOwnerOrAdmin, IsPatientFileOwnerOrAdmin
+
+from visits.models import Visit
 
 
 class PatientListCreateView(generics.ListCreateAPIView):
@@ -52,9 +55,9 @@ class PatientListCreateView(generics.ListCreateAPIView):
         # Only admins can view archived patients
         show_archived = self.request.query_params.get('archived', 'false').lower() == 'true'
         if show_archived and is_admin:
-            pass  # Show all including archived
+            qs = qs.filter(is_active=False)  # ONLY archived
         else:
-            qs = qs.filter(is_active=True)
+            qs = qs.filter(is_active=True)   # default: active only
 
         return (
             qs.annotate(
@@ -78,7 +81,7 @@ class PatientListCreateView(generics.ListCreateAPIView):
 
 class PatientDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = PatientSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsPatientOwnerOrAdmin]
 
     def get_queryset(self):
         now = timezone.now()
@@ -112,15 +115,12 @@ def archive_patient(request, pk):
     user = request.user
     is_admin = hasattr(user, 'profile') and user.profile.role == 'admin'
 
-    try:
-        if is_admin:
-            patient = Patient.objects.get(pk=pk)
-        else:
-            patient = Patient.objects.get(pk=pk, created_by=user)
-    except Patient.DoesNotExist:
+    patient = get_object_or_404(Patient, pk=pk)
+
+    if not is_admin and patient.created_by != user:
         return Response(
-            {"detail": "Patient not found or you don't have permission."},
-            status=status.HTTP_404_NOT_FOUND
+            {"detail": "You do not have permission to archive this patient."},
+            status=status.HTTP_403_FORBIDDEN
         )
 
     if not patient.is_active:
@@ -166,6 +166,27 @@ def restore_patient(request, pk):
     return Response({"detail": "Patient restored successfully."})
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def latest_medical_history(request, patient_id):
+    """
+    GET /api/patients/<patient_id>/latest-medical-history/
+    Returns the most recent non-empty medical_history from the patient's visits.
+    """
+    get_object_or_404(Patient, pk=patient_id)
+
+    medical_history = (
+        Visit.objects
+        .filter(patient_id=patient_id)
+        .exclude(medical_history="")
+        .order_by("-visit_date", "-created_at")
+        .values_list("medical_history", flat=True)
+        .first()
+    ) or ""
+
+    return Response({"medical_history": medical_history})
+
+
 class PatientFileViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing patient files.
@@ -178,7 +199,7 @@ class PatientFileViewSet(viewsets.ModelViewSet):
     - GET    /api/patients/{patient_id}/files/{id}/download/ - Download file
     """
     serializer_class = PatientFileSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsPatientFileOwnerOrAdmin]
     parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
@@ -193,6 +214,14 @@ class PatientFileViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         patient_id = self.kwargs.get('patient_id')
         patient = get_object_or_404(Patient, pk=patient_id)
+
+        # Check ownership for create (object-level permission won't fire on create)
+        user = self.request.user
+        is_admin = hasattr(user, 'profile') and user.profile.role == 'admin'
+        if not is_admin and patient.created_by != user:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("You do not have permission to upload files for this patient.")
+
         serializer.save(patient=patient)
 
     @action(detail=True, methods=['get'])

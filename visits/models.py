@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -8,6 +9,15 @@ class Visit(models.Model):
         "patients.Patient",
         on_delete=models.CASCADE,
         related_name="visits",
+    )
+
+    # Owner (doctor who created this visit)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="visits",
+        null=True,  # Allow null for existing records
+        blank=True,
     )
 
     # When / what type
